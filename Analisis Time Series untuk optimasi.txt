@@ -1,0 +1,22 @@
+Analisis Time Series untuk optimasi distribusi stasiun pengisian kendaraan listrik (BEV) berdasarkan data penjualan dan produksi mobil BEV melibatkan beberapa tahapan utama. Berikut ini adalah tahapan-tahapan yang umumnya dilakukan dalam proses ini:
+
+1. Pengumpulan Data: Mengumpulkan data historis penjualan mobil listrik (BEV) dan data produksi, serta data historis terkait stasiun pengisian kendaraan listrik.
+
+2. Pembersihan Data: Melakukan pembersihan data untuk menghilangkan nilai yang hilang atau tidak valid, menangani outlier, dan memastikan konsistensi data.
+
+3. Explorasi Data (Exploratory Data Analysis - EDA): Menjalankan analisis eksploratif untuk memahami pola-pola dasar dalam data, seperti tren, musiman, dan anomali.
+
+4. Preprocessing Data: Mempersiapkan data untuk analisis time series, termasuk transformasi data jika diperlukan (seperti perataan data atau transformasi log).
+
+5. Modeling Time Series: Memilih model yang sesuai untuk menganalisis time series data. 
+
+Langkah-langkahnya bisa mencakup:
+
+1. Identifikasi Model: menggunakan model **Prophet** (model yang dikembangkan oleh Facebook dan fokus pada komponen: trend, seasonality (bisa multiple), dan holiday effect. dll).
+2. Estimasi Parameter: Menentukan parameter optimal untuk model yang dipilih (pembagian rata-rata, standard deviasi, data testing dan data training).
+3. Validasi Model: menggunakan MAPE (Memvalidasi model untuk memastikan kecocokan dan keakuratannya).
+4. Peramalan (Forecasting): Menggunakan model yang telah disesuaikan untuk membuat perkiraan penjualan mobil BEV di masa depan. Perkiraan ini dapat membantu dalam merencanakan distribusi stasiun pengisian dengan lebih efisien.
+5. Optimasi Distribusi Stasiun Pengisian: Model yang digunakan Program Linear (Linear Programming, LP)
+Deskripsi: Model ini digunakan untuk memecahkan masalah optimasi di mana fungsi objektif dan kendala adalah linier. Tujuannya adalah untuk memaksimalkan atau meminimalkan fungsi linier dengan batasan-batasan linier.
+Contoh: Memaksimalkan keuntungan dari produksi dengan batasan sumber daya seperti bahan baku dan waktu mesin.
+6. Evaluasi dan Pemantauan: Melakukan evaluasi terhadap hasil peramalan dan implementasi distribusi stasiun pengisian, serta memantau kinerja sistem secara berkala.
