@@ -1,0 +1,201 @@
+---
+title: "EV_Time Series Analysis"
+author: "Roni Yunis"
+date: "2024-10-05"
+output: html_document
+---
+
+# Load Library
+```{r}
+library (dplyr)
+library (ggplot2)
+
+```
+
+# Obstain Data
+```{r}
+# import data
+data <- read.csv("data/EVChargingStationUsage.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+glimpse(data)
+```
+# Scrub
+```{r}
+# Cek Missing Value
+summary(data)
+```
+
+```{r}
+# Penanganan Missing Value
+
+```
+
+
+
+# EDA
+```{r}
+# Mengubah kolom "start Date menjadi tipe datetime
+data$Start.Date <- as.POSIXct(data$Start.Date, format="%m/%d/%Y %H:%M")
+
+glimpse(data)
+```
+## Analisis Deskriptif
+
+```{r}
+# Analisis Deskiptif
+
+```
+
+
+## Analisis Distribusi Data
+
+```{r}
+# Analisis Distribusi Data
+
+```
+
+## Analisis Outliear dan Missing Value
+
+```{r}
+# Analisis Outlier
+
+
+```
+
+## Analisis Principle Component Analysis (PCA)
+
+```{r}
+# Analisis PCA
+
+
+```
+
+
+## Menyiapkan Variabel
+```{r}
+# Mengkonversi kolom 'Charging Time (hh:mm:ss)' menjadi detik
+convert_to_seconds <- function(x) {
+  hms <- strsplit(x, ":")[[1]]
+  as.numeric(hms[1]) * 3600 + as.numeric(hms[2]) * 60 + as.numeric(hms[3])
+}
+data$Charging.Time <- sapply(data$Charging.Time..hh.mm.ss., convert_to_seconds)
+```
+
+```{r}
+# Mengelompokkan data berdasarkan tanggal, Station Name, Charging.Time, Latitude, dan Longitude
+daily_usage_station <- data %>% 
+  mutate(Date = as.Date(Start.Date)) %>%
+  group_by(Date, Station.Name, Charging.Time, Latitude, Longitude) %>%
+  count() %>% 
+  arrange(-n)
+
+daily_usage_station
+```
+```{r}
+# Menyimpan data daily_usage ke dalam file CSV
+write.csv(daily_usage_station, "daily_usage_station.csv", row.names = FALSE)
+```
+
+## Visualisasi
+```{r}
+# 2. Scatter Plot - Lokasi Stasiun Berdasarkan Latitude dan Longitude
+p1 <- ggplot(daily_usage_station, aes(x = Longitude, y = Latitude)) +
+  geom_point(aes(size = n, color = Charging.Time), alpha = 0.7) +
+  labs(title = "Charging Station Location", x = "Longitude", y = "Latitude", size = "Charging Session", color = "Charging Time") +
+  theme_minimal()
+p1
+```
+
+```{r}
+# 2. Bar Plot - Total Charging Time per Station
+p2 <- ggplot(daily_usage_station, aes(x = reorder(Station.Name, Charging.Time), y = Charging.Time)) +
+  geom_bar(stat = "identity", fill = "tomato2") +
+  coord_flip() +
+  labs(title = "Charging Time/Station", 
+       x = "Station Name", 
+       y = "Total Charging Time")+
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 5)
+  )
+
+p2
+```
+
+
+
+```{r}
+#Mengelompokkan data berdasarkan tanggal untuk menghitung jumlah pengisian dan total durasi pengisian
+daily_usage_station_set <- daily_usage_station %>%
+  group_by(Date) %>%
+  summarise(
+    total_charging_sessions = n(),
+    total_charging_duration = sum(Charging.Time, na.rm = TRUE)
+  )
+```
+
+```{r}
+# Mengubah durasi pengisian dari detik ke jam
+daily_usage_station_set$total_charging_duration <- daily_usage_station_set$total_charging_duration / 3600
+```
+
+```{r}
+head(daily_usage_station_set)
+```
+```{r}
+tail(daily_usage_station_set)
+```
+
+
+```{r}
+# Plot distribusi total sesi pengisian
+p1 <- ggplot(daily_usage_station_set, aes(x = total_charging_sessions)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Total Charging Sessions per day",
+       x = "Total Charging Sessions", y = "Frequency") +
+  theme_minimal()
+p1
+```
+
+```{r}
+# Plot distribusi total durasi pengisian (jam)
+p2 <- ggplot(daily_usage_station_set, aes(x = total_charging_duration)) +
+  geom_histogram(binwidth = 0.5, fill = "red", color = "black") +
+  labs(title = "Distribution of Total Charging Duration (Hours)",
+       x = "Total Charging Duration (Hours)", y = "Frequency") +
+  theme_minimal()
+p2
+```
+
+```{r}
+# Menampilkan kedua plot
+library(gridExtra)
+grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r}
+# Line plot untuk total charging sessions
+p1 <- ggplot(daily_usage_station_set, aes(x = Date, y = total_charging_sessions)) +
+  geom_line(color = "blue", size = 1) +
+  labs(title = "Daily Total Charging Sessions",
+       x = "Date", y = "Total Charging Sessions") +
+  theme_minimal()
+p1
+```
+
+```{r}
+# Line plot untuk total charging duration
+p2 <- ggplot(daily_usage_station_set, aes(x = Date, y = total_charging_duration)) +
+  geom_line(color = "tomato3", size = 1) +
+  labs(title = "Daily Total Charging Duration (Hours)",
+       x = "Date", y = "Total Charging Duration (Hours)") +
+  theme_minimal()
+p2
+```
+
+```{r}
+grid.arrange(p1, p2, ncol = 2)
+```
+
