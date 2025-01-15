@@ -1,0 +1,1554 @@
+---
+title: "Time_Series_TA"
+author: "Viona & Yessica"
+date: "2024-12-03"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+**Dataset ini berisi data penggunaan stasiun pengisian kendaraan listrik (EV charging station). alasan dipilihnya Karena dataset ini memiliki informasi waktu pengisian, durasi, lokasi (latitude, longitude), energi yang dikonsumsi, dan dampak lingkungan (GHG dan gasoline savings), yang semuanya merupakan variabel penting untuk memahami seberapa sering, di mana, dan seberapa efisien SPKLU digunakan serta kontribusinya terhadap pengurangan emisi dan penghematan energi.
+
+Tahapam untuk melakukan serangkaian analisis dengan menggunakan framework OSEMN:
+1. Obstain: Import data set
+2. Scrub: Menyesuaikan nama variabel, melihat data NA dan menyesuaikan data jika diperlukan 
+3. Explore: Melakukan ekplorasi dan visualisasi untuk variabel-variabel tertentu 
+4. Model: Mengembangkan model prediksi berdasarkan model yang sudah ditetapkan
+5. iNterpret: Menginterpretasikan hasil prediksi dan evaluasi yang sudah dilakukan
+
+Tujuan: Kembangkanlah model prediksi untuk memprediksi variabel respon (Total Durasi Pengisian & Jumlah Sesi Pengisian) berdasarkan beberapa variabel prediktor. Dataset memiliki 259,415 baris data dan 33 kolom (variabel). Model prediksi yang digunakan meliputi: Prophet & Random Forest. Partisilah dataset menjadi 2 bagian, dengan proporsi data training 80% dan data testing 20%. Bandingkan dan visualisasikan hasil dari prediksi masing-masing model dengan nilai aktual. Bandingkan dan evaluasilah kinerja model dengan metrik MAE, MSE, RMSE, dan MAPE.**
+
+# Load library/Packages
+Untuk mendukung klasifikasi yang akan dilakukan, maka ada beberapa packages/library yang diperlukan.
+```{r}
+library (dplyr) #berfungsi untuk memanipulasi data, menganalisis, dan merangkum data dalam pra-pemrosesan data seperti membersihkan data (filter, select, mutate), transformasi data (membuat kategori baru dari variabel numerik), pengelompokkan (group_by dan sum)
+library (ggplot2) #berfungsi untuk visualisasi data dalam hal ini eksplorasi, interpretasi, dan pelaporan hasil model.
+library (tidyverse) #berfungsi untuk manipulasi data tgl
+library(randomForest)#package untuk mengukur perfomansi model 
+library(caret)
+library(Metrics)# Evaluasi Models
+```
+
+
+**1. Obstain Data**
+```{r}
+#Import Data dalam format CSV
+data <- read.csv("data/EVChargingStationUsage.csv", stringsAsFactors = FALSE)
+```
+**Penjelasan: pada tahapan ini kita akan menyimpan file EVChargingStationUsage.csv kedalam object "data" dengan menggunakan stringsAsFactors = FALSE yang berfungsi agar variabel yang tipe chr tidak dirubah menjadi fct (faktor)**
+
+```{r}
+glimpse(data)
+```
+**Penjelasan: fungsi glimpse() menampilkan struktur dari 33 variabel dalam objek "data"**
+
+**2. Srub data**
+```{r}
+#Cek Missing Value
+summary(data)
+```
+**Penjelasan: fungsi ini menampilkan ringkasan data statistik dari objek 'data'. dapat dilihat bahwa terdapat 3 variabel yang memiliki NA's data yaitu variabel __EVSE_ID, Driver_Postal_Code, Systems_SN__**
+
+```{r}
+#Penanganan Missing Value
+colSums(is.na(data))
+```
+**Penjelasan: dengan menggunakan fungsi __colsums(is.na())__ dapat melihat jumlah nilai __missing value__ dari 3 variabel sebagai berikut:
+1. __EVSE_ID memiliki data Na's sebanyak 78948
+2. Driver_Postal_Code memiliki data Na's sebanyak 8402
+3. Systems_SN memiliki data Na's sebanyak 78948
+
+```{r}
+#Menghapus kolom yang memiliki nilai Na's
+data_selected <- data %>% 
+  select(-EVSE_ID, -Driver_Postal_Code, -System_SN)
+summary(data_selected)
+```
+#Penjelasan: menghapus data kosong dari baris variabel yang memiliki nilai NA's. bedanya dengan penggunaan fungsi na.omit() yaitu dia hanya Digunakan jika hanya memerlukan kolom tertentu dan ingin memastikan dataset bersih dari nilai NA. dalam hal ini hasil dari penggunaan fungsi na.omit() hanya menyimpan 3 variabel yang memiliki nilai NA's saja dan bukan menampilkan 30 variabel seperti di atas. penggunaan kedua fungsinya benar, hanya saja tergantung kebutuhan dalam analisis
+
+**3. Exploratory Data Analysis**
+
+## Merubah nilai Total Duration dan Charging Time ke Detik
+```{r}
+# Perubahan Nilai Variabel Total Duration
+data_selected$Total_Duration <- sapply(data_selected$Total_Duration, function(x) {
+  time_parts <- strsplit(x, ":")[[1]]
+  as.numeric(time_parts[1]) * 3600 + as.numeric(time_parts[2]) * 60 + as.numeric(time_parts[3])
+})
+
+# Perubahan Nilai Variabel Charging Time
+data_selected$Charging_Time <- sapply(data_selected$Charging_Time, function(x) {
+  time_parts <- strsplit(x, ":")[[1]]
+  as.numeric(time_parts[1]) * 3600 + as.numeric(time_parts[2]) * 60 + as.numeric(time_parts[3])
+})
+
+glimpse(data_selected)
+```
+#Penjelasan: Kode tersebut menggunakan fungsi `sapply` untuk menerapkan operasi pada setiap elemen kolom **Total_Duration** dan **Charging_Time**. Fungsi anonim dalam `sapply` menggunakan `strsplit` untuk memisahkan string waktu dalam format **HH:MM:SS** menjadi bagian-bagian (jam, menit, detik). Kemudian, setiap bagian diubah menjadi tipe numerik dengan `as.numeric`, dihitung totalnya dalam detik dengan rumus \((jam \times 3600) + (menit \times 60) + detik\), dan hasilnya disimpan kembali ke kolom masing-masing. Akhirnya, fungsi `glimpse` dari `dplyr` digunakan untuk menampilkan struktur dataset `data_selected`, termasuk nama kolom, tipe datanya, dan beberapa nilai contoh.
+
+```{r}
+# merubah format total duration dan charging time ke dalam jam
+data_selected$Total_Duration <- data_selected$Total_Duration / 3600
+data_selected$Charging_Time <- data_selected$Charging_Time / 3600
+glimpse(data_selected)
+```
+#Penjelasan: kode ini mengubah satuan waktu dalam dua kolom (Total_Duration dan Charging_Time) dari detik ke jam dan kemudian menampilkan ringkasan data setelah perubahan dilakukan.
+
+##Feature Selection dengan Random Forest (RF) membantu mengidentifikasi fitur yang paling penting untuk model, meningkatkan akurasi prediksi, mengurangi overfitting, dan mempercepat proses pelatihan dengan mengeliminasi fitur yang kurang relevan.
+
+```{r}
+# menghapus kolom yang tidak berisi fitur numerik atau kategori
+data_clean <- data_selected[, sapply(data_selected, is.numeric) | sapply(data_selected, is.factor)]
+```
+#Penjelasan: sapply(data_selected, is.numeric) Mengecek tiap kolom di dataset, apakah bertipe angka (hasilnya TRUE jika iya, FALSE jika tidak). sapply(data_selected, is.factor) Mengecek tiap kolom di dataset, apakah bertipe kategori (hasilnya TRUE jika iya, FALSE jika tidak). is.numeric | is.factor mengartikan kolom akan dipilih jika bertipe angka atau kategori. data_selected[, ...] Dataset baru dibuat dengan hanya menyimpan kolom yang bertipe angka atau kategori.
+```{r}
+# Mengganti NA dengan nilai rata-rata untuk kolom numerik dan kategorikal (jika ada)
+# Fungsi untuk mencari modus
+modus <- function(x) {
+  uniqv <- unique(x)
+  uniqv[which.max(tabulate(match(x, uniqv)))]
+}
+
+# Mengganti NA dengan rata-rata untuk kolom numerik dan modus untuk kolom kategorikal
+data_clean <- data_clean %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .))) %>%
+  mutate(across(where(is.character), ~ ifelse(is.na(.), modus(.[!is.na(.)]), .)))
+
+```
+#Penjelasan: 
+
+
+```{r}
+glimpse(data_clean)
+```
+```{r}
+# Menetapkan variabel 'Total.Duration' sebagai target
+target <- data_clean$Total_Duration #Variabel numerik atau faktor yang berisi nilai dari kolom
+features <- data_clean[, !names(data_clean) %in% "Total_Duration"] #Dataset baru berisi kolom-kolom selain Total_Duration yang digunakan sebagai fitur (features), tanpa kolom target.
+```
+#Penjelasan: berfungsi untuk memisahkan variabel target (apa yang ingin diprediksi) dari fitur (informasi yang digunakan untuk melakukan prediksi).
+
+```{r}
+# Perform feature selection using random forest
+set.seed(123)  # Untuk reproduktifitas, memastikan bahwa hasil Random Forest akan sama setiap kali kode dijalankan agar hasilnya konsisten..
+rf_model <- randomForest(x = features, y = target, importance = TRUE, ntree = 50) #membuat model Random Forest dan meminta model untuk menghitung importance score setiap fitur dengan 5   0 pohon keputusan.
+```
+#Penjelasan: Langkah ini membantu kita memilih fitur yang paling relevan untuk prediksi target, sehingga dapat meningkatkan efisiensi model.
+
+```{r}
+rf_model #Menampilkan detail dan performa model Random Forest.
+```
+#Penjelasan: Model ini menggunakan random forest untuk regresi dengan 20 pohon dan mempertimbangkan 3 variabel di setiap pemisahan. Dengan nilai MSR sebesar 1.815363, ini memberi tahu kita seberapa besar kesalahan rata-rata model dalam memprediksi nilai target (semakin kecil,maka semakin baik mdel dalam memprediksi nilai target) dan 62.92% variasi yang dijelaskan (Var Explained) mengukur seberapa baik model menjelaskan variasi atau perbedaan dalam data. Semakin tinggi, semakin baik model kita. namun, idealnya >75%, tetapi 60-70% masih dianggap baik untuk banyak aplikasi.
+```{r}
+importance(rf_model) #Menunjukkan peringkat fitur berdasarkan kepentingannya, yang dapat digunakan untuk meningkatkan model atau mengurangi dimensi data.
+```
+#Penjelasan: akan menampilkan seberapa besar Mean Squared Error (MSE), Fitur dengan %IncMSE tinggi sangat relevan untuk model. sedangkan, IncNodePurity menunjukkan seberapa besar fitur tersebut membantu meningkatkan "kemurnian" (purity) node dalam pohon keputusan.Dalam konteks regresi, ini menunjukkan seberapa baik model kita menangkap pola dalam data, semakin besar nilainya, semakin penting fitur tersebut.
+Note: %IncMSE: Persentase peningkatan Mean Squared Error (MSE) jika fitur tersebut secara acak dipertukarkan dengan fitur lain. Semakin tinggi nilai ini, semakin penting fitur tersebut dalam model.
+IncNodePurity: Peningkatan ketidakmurnian node jika fitur tersebut secara acak dipertukarkan dengan fitur lain. Semakin tinggi nilai ini, semakin penting fitur tersebut dalam membagi data menjadi kelompok yang lebih murni.
+
+```{r}
+# menympan kedalam objek baru dengan hanya mengambil hasil penting fitur yang
+importance_data <- importance(rf_model) 
+
+# Mengonversi data importance menjadi dataframe
+importance_df <- as.data.frame(importance_data)
+importance_df$Feature <- rownames(importance_df)
+
+# Menyusun dan mengurutkan data untuk visualisasi
+importance_df <- importance_df[order(importance_df$`%IncMSE`, decreasing = TRUE), ] #Data frame importance_df disusun dengan urutan fitur yang paling penting berdasarkan kontribusi mereka terhadap peningkatan MSE.
+
+# Membuat plot untuk %IncMSE dan IncNodePurity
+ggplot(importance_df, aes(x = reorder(Feature, `%IncMSE`), y = `%IncMSE`)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Feature Importance from Random Forest Model",
+       x = "Features", 
+       y = "%IncMSE") +
+  theme_minimal() +
+  scale_y_continuous(sec.axis = sec_axis(~ . / max(importance_df$IncNodePurity) * max(importance_df$`%IncMSE`), 
+                                        name = "IncNodePurity")) +
+  theme(axis.title.y.right = element_text(color = "green")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+#Penjelasan: hasil visualisasi menampilkan urutan feature selection untuk variabel target yang paling baik untuk diimplemntasikan kedalam tahapan analisis selanjutnya. Dan hasil visualisasi %IncMSE dan IncNodePurity membuktikan bahwa Charging time merupakan variabel yang paling penting untuk memprediksi variabel target.
+
+```{r}
+glimpse(importance_df)
+```
+
+## Menggabungkan data_selected dengan data_clean
+
+```{r}
+# Mengubah kolom "Transaction.Date" menjadi tipe datetime
+data_selected$Transaction_Date <- as.POSIXct(data_selected$Transaction_Date, format="%m/%d/%Y %H:%M")
+
+glimpse(data_selected)
+```
+#Penjelasan: mengubah tipe data variabel Transaction_Date dalam format dttm.
+
+## Analisis Deskriptif
+```{r}
+summary(data_clean)
+```
+#Penjelasan: Perintah summary(data_clean) dalam R memberikan ringkasan statistik dari setiap variabel dalam dataset data_clean, termasuk nilai minimum, kuartil pertama (Q1), median, kuartil ketiga (Q3), nilai maksimum, dan nilai rata-rata (mean) untuk data numerik, serta frekuensi kategori untuk data faktor.
+
+```{r}
+# Fungsi untuk menghitung jumlah outlier dalam satu kolom
+count_outliers <- function(data_clean) {
+  Q1 <- quantile(data_clean, 0.25, na.rm = TRUE)
+  Q3 <- quantile(data_clean, 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR #Nilai yang lebih kecil dari batas bawah atau lebih besar dari batas atas dianggap sebagai outlier.
+  sum(data_clean < lower_bound | data_clean > upper_bound, na.rm = TRUE)
+}
+
+# Menerapkan fungsi count_outliers untuk menghitung jumlah outlier (nilai yang sangat berbeda dari nilai lain) dalam setiap kolom data numerik.
+outlier_counts <- sapply(data_clean, function(col) {
+  if (is.numeric(col)) { #hanya kolom numerik yang dihitung outliernya)
+    count_outliers(col) #menghitung jumlah outlier untuk kolom numerik
+  } else {
+    NA # Mengabaikan kolom non-numerik
+  }
+})
+
+# Menghapus nilai NA (untuk kolom non-numerik) dari hasil
+outlier_counts <- outlier_counts[!is.na(outlier_counts)]
+
+# Menampilkan jumlah outlier di setiap kolom
+outlier_counts
+
+```
+#Penjelasan: menunjukkan jumlah outlier yang ditemukan dalam setiap kolom numerik dataframe yang telah diperiksa
+
+```{r}
+# Mengubah data frame ke format long untuk visualisasi
+df_long <- data_clean %>%
+  select_if(is.numeric) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
+
+# Membuat boxplot untuk semua kolom numerik
+ggplot(df_long, aes(x = Variable, y = Value)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Boxplot untuk Variabel dengan Outlier", y = "Nilai", x = "Variabel") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_text(data = data.frame(Variable = names(outlier_counts), Outliers = outlier_counts),
+            aes(x = Variable, y = Inf, label = paste("Outliers:", Outliers)),
+            vjust = -0.5, color = "red", size = 3.5)
+
+```
+#Penjelasan: Sumbu y menunjukkan rentang nilai untuk masing-masing variabel numerik dalam dataset. Nilai tersebut berada dalam rentang yang sangat besar, dengan nilai tertinggi mencapai lebih dari 1 miliyar pada beberapa variabel. sedangkan sumbu X, nama setiap variabel.Grafik boxplot ini memberikan gambaran visual yang jelas tentang distribusi data dan outliers untuk setiap variabel.Variabel seperti Charging_Time, Energy, dan Fee memiliki nilai outlier yang signifikan. Variabel lain seperti Latitude, Longitude, dan Postal_Code menunjukkan distribusi data yang lebih normal tanpa adanya banyak outliers.
+
+## Penanganan Outlier pada Variabel Charging_Time
+Menggunakan tranformasi dengan Winsorizing berdasarkan IQR
+
+```{r}
+# Menetapkan batas IQR untuk Charging_Time
+Q1 <- quantile(data_clean$Charging_Time, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Charging_Time, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Charging_Time <- pmin(pmax(data_clean$Charging_Time, lower_bound), upper_bound)
+
+```
+
+## Penanganan Outlier pada Variabel Total_Duration
+```{r}
+# Menetapkan batas IQR untuk Total_Duration
+Q1 <- quantile(data_clean$Total_Duration, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Total_Duration, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Total_Duration <- pmin(pmax(data_clean$Total_Duration, lower_bound), upper_bound)
+```
+
+
+## Penanganan Outlier pada Variabel GHG_Savings
+```{r}
+# Menetapkan batas IQR untuk GHG_Savings
+Q1 <- quantile(data_clean$GHG_Savings, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$GHG_Savings, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$GHG_Savings <- pmin(pmax(data_clean$GHG_Savings, lower_bound), upper_bound)
+```
+
+## Penanganan Outlier pada Variabel Energy
+```{r}
+# Menetapkan batas IQR untuk Energy
+Q1 <- quantile(data_clean$Energy, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Energy, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Energy <- pmin(pmax(data_clean$Energy, lower_bound), upper_bound)
+```
+
+## Penanganan Outlier pada Variabel Gasoline_Savings
+```{r}
+# Menetapkan batas IQR untuk Gasoline_Savings
+Q1 <- quantile(data_clean$Gasoline_Savings, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Gasoline_Savings, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Gasoline_Savings <- pmin(pmax(data_clean$Gasoline_Savings, lower_bound), upper_bound)
+```
+
+## Penanganan Outlier pada Variabel Longitude
+```{r}
+# Menetapkan batas IQR untuk Total.Duration
+Q1 <- quantile(data_clean$Longitude, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Longitude, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Longitude <- pmin(pmax(data_clean$Longitude, lower_bound), upper_bound)
+```
+
+## Penanganan Outlier pada Variabel Fee
+```{r}
+# Menetapkan batas IQR untuk Total.Duration
+Q1 <- quantile(data_clean$Fee, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Fee, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Fee <- pmin(pmax(data_clean$Fee, lower_bound), upper_bound)
+```
+
+## Penanganan Outlier pada Variabel Plug_In_Event_Id
+```{r}
+# Menetapkan batas IQR untuk Plug_In_Event_Id
+Q1 <- quantile(data_clean$Plug_In_Event_Id, 0.25, na.rm = TRUE)
+Q3 <- quantile(data_clean$Plug_In_Event_Id, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# Menetapkan batas bawah dan atas
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Winsorizing - menetapkan batas untuk outlier
+data_clean$Plug_In_Event_Id <- pmin(pmax(data_clean$Plug_In_Event_Id, lower_bound), upper_bound)
+```
+
+```{r}
+# Mengubah data frame ke format long untuk ggplot2
+df_long <- data_clean %>%
+  select_if(is.numeric) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
+
+# Membuat boxplot untuk semua kolom numerik
+ggplot(df_long, aes(x = Variable, y = Value)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Boxplot Variabel Berdasarkan Hasil Transformasi", y = "Nilai", x = "Variabel") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+#Penjelasan: Setelah dilakukan transformasi data, ini menunjukkan penurunan jumlah outlier secara signifikan. Hal ini menandakan bahwa transformasi data yang dilakukan berhasil dalam mengurangi pengaruh outlier pada analisis. Namun, masih terdapat satu outlier yang cukup mencolok pada variabel "Port_Number". Perbedaan ini menunjukkan bahwa transformasi data tidak sepenuhnya menghilangkan semua outlier, tetapi telah berhasil mengurangi jumlahnya dan membuatnya lebih mudah untuk diidentifikasi dan diatasi.
+
+## Analisis Distribusi Data
+```{r}
+# Membuat histogram untuk setiap variabel dalam satu grafik
+ggplot(df_long, aes(x = Value)) +
+  geom_histogram(binwidth = 10, fill = "skyblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "Distribusi Data untuk Semua Variabel", x = "Nilai", y = "Frekuensi") +
+  theme_minimal()
+
+```
+#Penjelasan: Sebagian besar variabel menunjukkan distribusi yang tidak merata, dengan banyak data terkonsentrasi di nilai rendah atau pada satu rentang tertentu, seperti pada Charging_Time dan GHG_Saving. Variabel geografis (Latitude dan Longitude) terdistribusi merata, mencerminkan cakupan wilayah yang luas, sementara Port_Number juga relatif stabil. Namun, variabel seperti Plug_In_Event_Id dan Total_Duration menunjukkan distribusi yang sangat skewed,menunjukkan mayoritas durasi pengisian sangat singkat, dengan beberapa outlier pada durasi lebih lama.
+
+## Analisis Korelasi
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# Menghitung korelasi antara kolom numerik
+cor_matrix <- data_clean %>% 
+    select_if(is.numeric)
+
+cor_matrix <- cor(cor_matrix)    
+
+# Mengonversi matriks korelasi ke dalam format data frame
+melted_cor_matrix <- melt(cor_matrix)
+
+# Membuat heatmap dengan ggplot2, menambahkan nilai korelasi ke setiap ubin
+ggplot(data = melted_cor_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") + # Menambahkan batas warna putih
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1, 1), space = "Lab",
+                       name="Correlation") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 3) + # Menampilkan nilai korelasi dengan 2 desimal
+  theme_minimal() + # Tema minimal untuk tampilan lebih rapi
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) + # Memiringkan teks sumbu x
+  coord_fixed() + # Menyesuaikan skala
+  labs(title = "Correlation Heatmap with Correlation Values")
+
+```
+#Penjelasan:Analisis heatmap korelasi mengungkapkan pola hubungan yang kompleks antara variabel-variabel dalam dataset. Variabel-variabel terkait waktu pengisian daya, energi, dan penghematan memiliki korelasi positif yang sangat kuat, sementara variabel geografis menunjukkan pola korelasi negatif. Hasil ini dapat digunakan untuk memahami hubungan antara variabel-variabel tersebut dan membangun model prediksi dalam analisis lebih lanjut.
+
+```{r}
+# Join Transaction_Date, Station_Name ke dalam data_clean
+data_clean$Transaction_Date <- data_selected$Transaction_Date
+data_clean$Station_Name <- data_selected$Station_Name
+glimpse(data_clean)
+```
+#Penjelasan: menunjukkan hasil variabel dalam dataset sudah menjadi 13, dimana sebelumnya hanya 11 variabel.
+
+## Menyiapkan Variabel
+```{r}
+# Mengelompokkan data berdasarkan tanggal, Station Name, Charging.Time, Latitude, dan Longitude
+daily_usage_station <- data_clean %>% 
+  mutate(Date = as.Date(Transaction_Date)) %>%
+  group_by(Date, Station_Name, Charging_Time, Total_Duration, Energy, GHG_Savings, Gasoline_Savings, Latitude, Longitude, Postal_Code ) %>%
+  count() %>% 
+  arrange(-n)
+
+# Menyimpan data daily_usage ke dalam file CSV
+write.csv(daily_usage_station, "daily_usage_station.csv", row.names = FALSE)
+
+daily_usage_station
+```
+#Penjelasan: hasil diatas secara efektif mengelompokkan data dalam data_clean berdasarkan beberapa kriteria utama: Date, Station_Name, Charging_Time, Total_Duration, Energy, GHG_Savings, Gasoline_Savings, Latitude, Longitude, dan Postal_Code. Kemudian menghitung jumlah kejadian untuk setiap kombinasi unik dari nilai-nilai ini dalam kelompok. Ini pada dasarnya merangkum data dengan memberikan wawasan tentang pola pengisian daya yang paling sering berdasarkan nama stasiun, waktu pengisian daya, lokasi, dan faktor lainnya. Output dapat disimpan sebagai file CSV untuk analisis dan visualisasi lebih lanjut.
+
+## Visualisasi
+```{r}
+# 2. Scatter Plot - Lokasi Stasiun Berdasarkan Latitude dan Longitude
+p1 <- ggplot(daily_usage_station, aes(x = Latitude, y = Longitude)) +
+  geom_point(aes(size = n, color = Charging_Time), alpha = 0.7) +
+  labs(title = "Charging Station Location", x = "Latitude", y = "Longitude", size = "Charging Session", color = "Charging Time") +
+  theme_minimal()
+p1
+```
+#Penjelasan: Lokasi ditunjukkan oleh koordinat latitude (Y) dan longitude (X). Semakin besar nilai absolut lintang atau bujur, maka lokasi semakin jauh dari ekuator atau garis meridian. Charging session merupakan ukuran titik pada grafik mewakili jumlah sesi pengisian daya yang terjadi di setiap stasiun. Semakin besar titik, semakin banyak sesi pengisian daya yang terjadi di stasiun tersebut. Charging Time merupakan warna titik yang menunjukkan durasi waktu pengisian daya rata-rata di setiap stasiun. Skala warna biasanya menunjukkan rentang waktu, misalnya dari 1 hingga 5 unit waktu (misal, jam).Visualisasi ini secara jelas menunjukkan distribusi spasial dan karakteristik penggunaan stasiun pengisian daya. Ukuran titik mewakili jumlah sesi pengisian daya, sementara warna titik menunjukkan durasi rata-rata pengisian daya. Grafik ini memberikan wawasan berharga tentang pola penggunaan stasiun pengisian daya dan dapat digunakan untuk mengidentifikasi area dengan kebutuhan pengisian daya yang tinggi serta mengoptimalkan jaringan pengisian daya.
+```{r}
+# 2. Bar Plot - Total Charging Time per Station
+p2 <- ggplot(daily_usage_station, aes(x = reorder(Station_Name, Charging_Time), y = Charging_Time)) +
+  geom_bar(stat = "identity", fill = "tomato2") +
+  coord_flip() +
+  labs(title = "Charging Time/Station", 
+       x = "Station Name", 
+       y = "Total Charging Time")+
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 5)
+  )
+
+p2
+```
+#Penjelasan: sumbu X menunjukkan total Charging Time. Semakin panjang batang, semakin lama total waktu pengisian daya di stasiun tersebut. Sumbu Y mengukur total waktu yang dihabiskan untuk mengisi daya kendaraan di setiap stasiun dengan mengurutkan nama-nama stasiun berdasarkan charging time. Hasil ini dapat Membantu mengidentifikasi stasiun dengan permintaan tertinggi atau sesi pengisian daya terlama.
+
+```{r}
+#Mengelompokkan data berdasarkan tanggal untuk menghitung jumlah pengisian dan total durasi pengisian
+daily_usage_station_set <- daily_usage_station %>%
+  group_by(Date) %>%
+  summarise(
+    total_charging_sessions = n(), #jumlah berapa kali stasiun digunakan pada setiap tanggal
+    total_charging_duration = sum(Charging_Time, na.rm = TRUE) #mengabaikan nilai NA dalam perhitungan
+  )
+```
+#Penjelasan: mengelompokkan variabel Tanggal dimana setiap baris mewakili satu tanggal, variabel Total Sesi Pengisian berisi jumlah total sesi pengisian yang terjadi pada setiap tanggal, dan variabel Total Durasi Pengisian berisi total durasi (dalam satuan waktu jam) di semua sesi pengisian pada setiap tanggal.
+
+```{r}
+head(daily_usage_station_set)
+```
+#penjelasan: melihat 6 nilai teratas dalam objek
+```{r}
+tail(daily_usage_station_set)
+```
+#penjelasan: melihat 6 nilai terbawah dalam objek
+```{r}
+colSums(is.na(daily_usage_station_set))
+```
+#penjelasan: melihat data kosong dalam objek baru
+```{r}
+daily_usage_station_set <- na.omit(daily_usage_station_set)
+```
+#penjelasan: menghapus data kosong dalam objek.
+```{r}
+# Plot distribusi total sesi pengisian
+p1 <- ggplot(daily_usage_station_set, aes(x = total_charging_sessions)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Total Charging Sessions per day",
+       x = "Total Charging Sessions", y = "Frequency") +
+  theme_minimal()
+p1
+```
+#penjelasan: Menampilkan distribusi jumlah sesi pengisian per hari. Sebagian besar hari memiliki jumlah sesi pengisian antara 0 hingga 100. Distribusi ini menunjukkan bahwa umumnya terdapat banyak hari dengan jumlah sesi pengisian yang relatif rendah. Namun, ada juga beberapa hari dengan lonjakan sesi pengisian yang signifikan. Hal ini bisa mengindikasikan adanya faktor-faktor tertentu yang mempengaruhi jumlah sesi pengisian, seperti hari libur, cuaca ekstrem, atau event khusus.
+```{r}
+# Plot distribusi total durasi pengisian (jam)
+p2 <- ggplot(daily_usage_station_set, aes(x = total_charging_duration)) +
+  geom_histogram(binwidth = 0.5, fill = "red", color = "black") +
+  labs(title = "Distribution of Total Charging Duration (Hours)",
+       x = "Total Charging Duration (Hours)", y = "Frequency") +
+  theme_minimal()
+p2
+```
+#penjelasan: Menampilkan distribusi total durasi pengisian per hari. visualisasi di atas menunjukkan seberapa lama stasiun pengisian digunakan setiap hari. Dengan kata lain, hasil ini memberikan gambaran tentang total durasi pengisian dari hari ke hari. hasil ini juga dapat mengenali pola penggunaan karena menunjukkan bahwa pada hari-hari tertentu (grafik yang tinggi), pengguna cenderung mengisi daya kendaraan mereka dalam waktu yang lebih lama.
+```{r}
+# Menampilkan kedua plot
+library(gridExtra)
+grid.arrange(p1, p2, ncol = 2)
+```
+
+
+```{r}
+# Line plot untuk total charging sessions
+p1 <- ggplot(daily_usage_station_set, aes(x = Date, y = total_charging_sessions)) +
+  geom_line(color = "blue", size = 1) +
+  labs(title = "Daily Total Charging Sessions",
+       x = "Date", y = "Total Charging Sessions") +
+  theme_minimal()
+p1
+```
+#Penjelasan: visualisasi ini menunjukkan tren total sesi pengisian per hari dari tahun 2012 hingga 2020. terlihat adanya kenaikan dalam total sesi pengisian dari tahun ke tahun yang mengindikasi adanya peningkatan permintaan layanan kendaraan listrik pada tahun tertentu. dan beberapa pola lonjakan yang tinggi dapat disebabkan oleh acara khusus,liburan,atau faktor lainnya.
+```{r}
+# Line plot untuk total charging duration
+p2 <- ggplot(daily_usage_station_set, aes(x = Date, y = total_charging_duration)) +
+  geom_line(color = "tomato3", size = 1) +
+  labs(title = "Daily Total Charging Duration (Hours)",
+       x = "Date", y = "Total Charging Duration (Hours)") +
+  theme_minimal()
+p2
+```
+#Penjelasan: visualisasi ini menunjukkan tren total durasi pengisian (dalam jam) per hari dari tahun 2012-2020. hal ini mengindikasi peningkatan permintaan layanan pengisian dan durasi yang lebih lama dari waktu tertentu yang bisa disebabkan oleh acara khusus,liburan,atau faktor lainnya.
+```{r}
+grid.arrange(p1, p2, ncol = 2)
+```
+#penjelasan: Plot p1 (geom_line): Menampilkan tren jumlah sesi pengisian dari waktu ke waktu. Garis yang terbentuk menunjukkan apakah jumlah sesi pengisian cenderung meningkat, menurun, atau stabil. Memungkinkan kita melihat secara jelas kapan terjadi lonjakan atau penurunan yang signifikan dalam jumlah sesi pengisian. 
+Plot p2 (geom_histogram): Menampilkan distribusi total durasi pengisian. Kita dapat melihat berapa banyak hari yang memiliki durasi pengisian pendek, sedang, atau panjang.
+Memungkinkan kita mengidentifikasi rentang durasi pengisian yang paling sering terjadi dan apakah ada durasi pengisian yang sangat ekstrem.
+
+**Model Data**
+
+## Prophet Model
+**Prophet** adalah model yang dikembangkan oleh Facebook dan fokus pada komponen: trend, seasonality (bisa multiple), dan holiday effect. dll.
+
+### Dataset daily_usage_station_set
+```{r}
+library(prophet)
+library(caret)
+```
+```{r}
+daily_usage_station_set
+```
+
+
+```{r}
+# membagi data
+# membagi data berdasarkan variabel total_charging_sessions
+train_data_index <- createDataPartition(daily_usage_station_set$total_charging_sessions, p=0.7, list = FALSE)
+train_data_sessions <- daily_usage_station_set[train_data_index,]
+train_data_sessions
+test_data_sessions <- daily_usage_station_set[-train_data_index,]
+test_data_sessions
+```
+#Penjelasan: Secara efektif membagi dataset menjadi data latih (70) dan data uji (30), dan memastikan bahwa sebagian data disimpan untuk evaluasi model. Pembagian ini penting untuk membangun dan menilai model machine learning.
+```{r}
+dim(train_data_sessions)
+dim(test_data_sessions)
+```
+
+
+```{r}
+# Mengelompokkan dan Menyiapkan data training berdasarkan variabel total_charging_sessions
+date_train_cs <- train_data_sessions %>% 
+  group_by(Date) %>% 
+  summarise(
+    Total_Charging_sessions = sum(total_charging_sessions)
+  )
+date_train_cs
+```
+#penjelasan: bertujuan untuk mengelompokkan data berdasarkan tanggal dan menghitung total sesi pengisian untuk setiap tanggal. Mengelompokkan data berdasarkan tanggal, kita dapat melihat bagaimana jumlah sesi pengisian bervariasi dari hari ke hari. Ini memungkinkan kita untuk mengidentifikasi tren, musim, atau anomali dalam penggunaan stasiun pengisian. Objek ini dapat digunakan sebagai input untuk model prediksi dalam memprediksi jumlah sesi pengisian di masa mendatang.
+
+## Menyiapkan data
+
+```{r}
+# Menyiapkan data
+train_daily_cs <- train_data_sessions %>% 
+  rename(
+    ds = "Date",
+    y = "total_charging_sessions"
+    )
+glimpse(train_daily_cs)
+```
+#penjelasan: Untuk menggunakan algoritma/model Prophet pertama-tama yang harus dilakukan adalah menyiapkan data frame dengan format: ds untuk menyimpan tanggal, dan y untuk menyimpan dari nilai yang akan prediksi.
+
+## Fit Model Data Training
+Melakukan pemodelan data training dengan menggunakan fungsi `fit.prophet()` dimana sebelumnya kita harus menentukan seasonality nya. dalam kasus ini kita mengggunakan `daily.seasonality`
+
+```{r}
+# Membuat model Prophet dengan data training
+model_ts_cs <- prophet(daily.seasonality = TRUE,
+  changepoint.prior.scale = 0.1,  # Mengatur perubahan tren yang lebih halus
+  trend.prior.scale = 0.05,       # Mengatur kelicinan tren
+  seasonality.prior.scale = 0.5,  # Memperhatikan musiman dengan lebih ketat
+  changepoint.range = 0.95,       # Mengatur rentang titik perubahan tren
+  holidays.prior.scale = 10,      # Memperbesar pengaruh hari libur
+  seasonality.mode = "multiplicative"  # Menggunakan mode musiman multiplicative untuk data yang menunjukkan fluktuasi yang besar
+) %>%  
+  fit.prophet(train_daily_cs)
+```
+#penjelasan: Dengan menambahkan komponen musiman harian dalam model (daily.seasonality), dan (seasonality.prior.scale = 0.1) untuk mengatur kekuatan (prior strength) pada komponen musiman, yang membantu mengendalikan overfitting. Lalu melatih model Prophet menggunakan dataset train_daily_cs yang berisi kolom ds, y, dan total_charging_duration untuk melatih menggunakan model prophet.
+
+## Menyiapkan tanggal untuk prediksi
+
+```{r}
+# menyiapkan tanggal utk prediksi
+future_ts_cs <- make_future_dataframe(model_ts_cs, periods = 365, freq = "day")
+glimpse(future_ts_cs)
+```
+#Penjelasan: Periode prediksi adalah 1 tahun kedepan atau 365 hari dengan menggunakan fungsi (make_future_dataframe) dari objek model_ts_cs hasil parameter daily.seasonality dan disimpan dalam dataframe baru dengan nama future_ts_cs.
+
+## Visualisasi hasil forecasting untuk perkiraan data 1 tahun kedepan
+
+```{r}
+# visualisasi hasil forecasting
+forecast_ts_cs <- predict(model_ts_cs, future_ts_cs)
+plot(model_ts_cs, forecast_ts_cs)
+```
+#Penjelasan: hasil dari parameter daily.seasonality yang diprediksi menggunakan fungsi make_future_dataframe ini menjelaskan grafik yang berisi komponen musiman harian dalam model (daily.seasonality) prediksi 1 tahun kedepan. Dapat dilihat dari hasil plotting grafik terdapat Visualisasi titik-titik hitam mewakili data aktual dari masa lalu, yang dimana dapat terlihat tren kenaikan di waktu tertentu dalam data historis. Garis biru tebal mewakili nilai prediksi untuk periode mendatang, garis ini menunjukkan tren yang diprediksi oleh model.Sedangkan, area biru muda disekitar garis menunjukkan interval dimana nilai sebenarnya kemungkinan besar akan berada.
+
+## Visualisasi komponen model
+Visualisasi komponen model Prophet adalah cara untuk melihat secara jelas bagaimana model memprediksi data deret waktu. Dengan melihat grafik tren, musiman, dan efek hari libur, kita bisa memahami pola data, mengevaluasi akurasi model, dan menemukan data yang tidak biasa. Singkatnya, visualisasi ini membantu kita "melihat" bagaimana model bekerja.Dengan prophet dimungkinkan kita memvisulisasikan berdasarkan trend, weekly, dan yearly.
+Default:
+- daily: sampling hourly, dan frequency 24
+- weekly: sampling daily, dan frequency 7
+- yearly: sampling daily dan frequency 365
+
+```{r}
+#visualiasi komponen model
+prophet_plot_components(model_ts_cs, forecast_ts_cs)
+```
+#Penjelasan: ini merupakan hasil forecast plot komponen menggunakan parameter daily.seasonality
+1. Tren: hasil plot menunjukkan tren cenderung turun namun pola tren naik pada tahun 2017-2019.
+2. Weekly: dapat dilihat bahwa peningkatan terjadi pada hari wednesday dan thursday.
+3. Yearly: Dalam setahun, pola musiman tahunan ini menunjukkan grafik yang menurun.
+4. Daily: dalam Harian, pola musiman harian menunjukkan bahwa grafik di atas pukul 22:00 cenderung naik.
+Dengan melihat visualisasi ini, kita dapat memahami bagaimana model Prophet mendekomposisi data dan faktor-faktor apa yang paling mempengaruhi nilai prediksi.
+
+## forecast berdasarkan seasonality bulan
+```{r}
+# forecast berdasarkan seasionality monthly (bulan)
+
+# Model Prophet dengan tuning parameter
+model_ts_monthly_cs <- prophet(
+  changepoint.prior.scale = 0.1,   # Adjust sesuai sensitivitas terhadap tren
+  trend.prior.scale = 0.1,        # Tuning untuk kelancaran tren
+  seasonality.prior.scale = 0.05, # Prioritas pada komponen musiman
+  changepoint.range = 0.95,
+  yearly.seasonality = FALSE,     # Menonaktifkan musiman tahunan
+  weekly.seasonality = FALSE      # Menonaktifkan musiman mingguan
+) %>%
+  # Menambahkan komponen musiman bulanan
+  add_seasonality(name = "monthly", period = 30.5,   fourier.order = 5) %>%
+  # Melatih model pada data train
+  fit.prophet(train_daily_cs)
+future_ts_monthly_cs <- make_future_dataframe( model_ts_monthly_cs, periods = 365,  freq = "day")
+forecast_ts_monthly_cs <- predict(model_ts_monthly_cs, future_ts_monthly_cs)
+prophet_plot_components(model_ts_monthly_cs, forecast_ts_monthly_cs)
+
+# Menampilkan plot prediksi keseluruhan
+plot(model_ts_monthly_cs, forecast_ts_monthly_cs)
+
+```
+#Penjelasan: berdasarkan seasionality month (bulan) pola trend, weekly, dan monthly menggunakan parameter add_seasonality() untuk menambahkan komponen seasonality bulanan dengan periode 30.5 hari dan fourier.order untuk mengatur kompleksitas lalu menonaktifkan parameter komponen tahunan (yearly.seasonality = FALSE)) menunjukkan hasil yang sama yang mana pola weekly bahwa tren naik terjadi pada hari-hari kerja yaitu (weekdays).
+``
+#Penjelasan: Visualisasi titik-titik hitam mewakili data aktual dari masa lalu, yang dimana dapat terlihat tren kenaikan di setiap bulan tertentu dalam data historis. Garis biru tebal mewakili nilai prediksi untuk periode mendatang, garis ini menunjukkan tren yang diprediksi oleh model.Sedangkan, area biru muda disekitar garis menunjukkan interval dimana nilai sebenarnya kemungkinan besar akan berada. hasil plot ini menunjukkan bahwa grafik mampu menangkap pola tren penggunaan total sesi pengisian dengan benar. Dengan hasil plot model ini, kita dapat menganalisis akurasi model menggunakan metrik evaluasi.
+
+## forecast berdasarkan seasionality penambahan holiday (hari libur)
+
+```{r}
+# Menetapkan hari libur mulai dari tahun 2011 sampai 2021, misal libur di hari natal 25 desember atau tahun baru setiap tanggal 31 desember
+holiday_cs <- 
+  data.frame( 
+    Holiday = "newyeareve", 
+    ds = dmy(c("31-12-2011","31-12-2012","31-12-2013","31-12-2014", "31-12-2015", "31-12-2016", "31-12-2017", "31-12-2018", "31-12-2019", "31-12-2020", "31-12-2021")), 
+    lower_window = -7, 
+    upper_window = +7 
+  ) 
+holiday_cs 
+
+```
+#Penjelasan: kolom _Holiday_ menunjukkan nama hari libur yang telah ditetapkan, kolom _ds_ menunjukkan tanggal dimana hari libur terjadi, kolom _lower_window_ merupakan parameter yang menentukan berapa hari sebelum hari libur efeknya mulai terasa. Dalam contoh ini, nilai -5 berarti efek hari libur mulai terasa 5 hari sebelum hari libur itu sendiri. 3 variabel tersebut disimpan di objek baru dengan tujuan model akan mencoba untuk mengidentifikasi pola-pola yang terjadi sebelum dan sesudah hari libur Tahun Baru, dan menggunakan informasi ini untuk membuat prediksi yang lebih akurat.
+
+```{r}
+# visualisasi hasil forecast dengan penambahan efek holiday dalam parameter musiman bulan
+model_ts_holiday_cs <- prophet(changepoint.prior.scale = 0.1,
+                               trend.prior.scale = 0.05,
+                               seasonality.prior.scale = 0.5,
+                               changepoint.range = 0.95,
+                               holidays.prior.scale = 10,
+                    Holidays = Holiday) %>% 
+  add_seasonality(name = "monthly", period = 30.5, fourier.order = 5) %>% 
+  fit.prophet(train_daily_cs) 
+future_ts_holiday_cs <- make_future_dataframe(model_ts_holiday_cs, periods = 365) 
+forecast_ts_holiday_cs <- predict(model_ts_holiday_cs, future_ts_holiday_cs) 
+plot(model_ts_holiday_cs, forecast_ts_holiday_cs)
+```
+#Penjelasan: hasil visualisasi stelah ditambahkannya efek holiday, menunjukkan berarti model dapat lebih akurat dalam memprediksi fluktuasi yang disebabkan oleh hari libur. Dengan mempertimbangkan efek hari libur, model dapat menghasilkan prediksi yang lebih akurat, terutama di sekitar periode liburan. Garis prediksi cenderung lebih dekat ke titik-titik data aktual, terutama di sekitar hari libur.Interval kepercayaan mungkin lebih sempit, terutama di sekitar periode liburan, karena model memiliki pemahaman yang lebih baik tentang pola data.
+```{r}
+# melihat trend dan holiday effect dari perkiraan dalam parameter musiman bulan
+prophet_plot_components(model_ts_holiday_cs, forecast_ts_holiday_cs)
+```
+#Penjelasan: hasil dari visualisasi adanya trend dan holiday effect menunjukkan grafik tren lebih stabil.Garis tren cenderung mendatar, menunjukkan bahwa tidak ada kenaikan atau penurunan yang signifikan secara keseluruhan. Pola musiman mingguan, bulanan, dan tahunan yang terlihat pada grafik menunjukkan bahwa ada faktor-faktor musiman yang signifikan mempengaruhi data Anda. Penambahan komponan holiday membantu model menangkap efek libur sehingga dapat meningkatkan akurasi prediksi.
+
+## Melihat hasil perkiraan berdasarkan trend dan seasonality
+
+```{r}
+forecast_ts_cs %>%
+  select(ds, trend, weekly, yearly, yhat) #menghitung fluktuasi forecasting, sedangkan yhat jumlah dari semua hasil
+```
+#Penjelasan: dataframe diatas menunjukkan:
+1. nilai trend pada tanggal 2011-07-29 positif yang mengindikasi tren kenaikan, sedangkan nilai negatif mengindikasi tren penurunan.
+2. weekly dan yearly menunjukkan pengaruh musiman mingguan dan tahunan pada setiap tanggal. Nilai positif atau negatif menunjukkan seberapa besar pengaruh musiman mingguan terhadap nilai prediksi.
+3. yhat merupakan nilai prediksi akhir yang diperoleh dengan menjumlahkan nilai trend, musiman mingguan, dan musiman tahunan.
+
+# Model fine Tuning untuk melihat trend liner dari permintaan
+
+Ini digunakan untuk melihat trend perkiraan dengan bentuk lain yaitu dengan menambahkan changepoint (titik perubahan signifikan baik itu peningkatan dan penurunan dalam pola). dalam hal ini menggunakan fungsi threshold sebagai ambang batas. jika data melebihi nilai threshold, maka model akan menganggap bahwa telah terjadi perubahan yang cukup signifikan untuk danggap sebagai sebuah changepoint (semakin rendah nilainya maka semakin mudah mendeteksi perubahan kecil dalam data).
+
+```{r}
+plot(model_ts_cs, forecast_ts_cs) + 
+  add_changepoints_to_plot(model_ts_cs, threshold = 0) 
+```
+#Penjelasan: 
+
+```{r}
+before_2022_cs <- train_data_sessions %>% 
+  mutate( 
+    year = year(Date) 
+  ) %>% 
+  filter(year < 2022) %>% 
+  rename( 
+    ds = "Date", 
+    y = "total_charging_sessions" 
+  ) 
+
+after_2022_cs <- train_data_sessions %>% 
+  mutate( 
+    year = year(Date) 
+  ) %>% 
+  filter(year >= 2022) %>% 
+  rename( 
+    ds = "Date", 
+    y = "total_charging_sessions" 
+  ) 
+ggplot(before_2022_cs, aes(x=ds, y=y)) + 
+  geom_point() + 
+  theme_minimal()
+```
+#Penjelasan: tren grafik dari hasil visualiasi yang difilter berdasarkan setelah dan sebelum 2022 adalah menurun.
+
+```{r}
+# Model sebelum 2022 dan visualisasinya menggunakan parameter yearly.seasonality = TRUE
+model_before_2022_cs <- prophet(yearly.seasonality = TRUE, 
+                             changepoint.prior.scale = 0.1,
+                             trend.prior.scale = 0.05,
+                             seasonality.prior.scale = 0.5,
+                             changepoint.range = 0.95,
+                             holidays.prior.scale = 10) %>% 
+  fit.prophet(before_2022_cs) #melatih model menggunakan data sebeleum 2022
+future_before_2022_cs <- make_future_dataframe(model_before_2022_cs, periods = 365) 
+forecaset_before_2022_cs <- predict(model_before_2022_cs, future_before_2022_cs) 
+plot(model_before_2022_cs, forecaset_before_2022_cs) + 
+  add_changepoints_to_plot(model_before_2022_cs) + 
+  geom_point(data = after_2022_cs, aes(x = as.POSIXct(ds), y=y), color = "tomato3")
+```
+#Penjelasan:
+1. Garis Biru: Garis biru tebal mewakili prediksi rata-rata yang dihasilkan oleh model Prophet untuk periode waktu yang dianalisis. Garis ini memberikan gambaran umum tentang tren data di masa depan berdasarkan pola yang ditemukan dalam data historis.
+2. Area Shaded: Area berwarna abu-abu di sekitar garis biru merepresentasikan interval kepercayaan (confidence interval). Interval ini memberikan rentang nilai yang kemungkinan besar akan mencakup nilai sebenarnya di masa depan. Semakin lebar area shaded, semakin tinggi ketidakpastian dalam prediksi.
+3. Titik-Titik Hitam: Titik-titik hitam mewakili data historis yang digunakan untuk melatih model.
+4. Garis Vertikal Merah: Garis-garis vertikal merah menunjukkan titik perubahan (changepoints) yang terdeteksi oleh model. Titik perubahan ini menandai adanya perubahan signifikan dalam tren data.
+kesimpulannya: Model mendeteksi adanya tren peningkatan secara umum pada data hingga mencapai puncak tertentu, kemudian cenderung menurun dan Terdapat pola musiman yang cukup jelas dalam data, ditunjukkan oleh fluktuasi nilai data secara berkala.
+```{r}
+# Melihat sesi paling banyak dalam satu minggu
+forecast_ts_cs %>% 
+  mutate( 
+    weekday = wday(ds, label = TRUE), 
+    weekly = round(weekly, 5) #nilai numerik yang menunjukkan pengaruh terhdap prediksi, dgn membulatkan nilai hingga 5 desimal
+  ) %>% 
+  filter(ds <= max(train_data_sessions$Date)) %>% 
+  select(weekday, weekly) %>% 
+  distinct() %>% 
+  arrange(-weekly)
+```
+#Penjelasan: dapat dilihat bahwa sesi pengisian terbanyak ada di hari Wednesday sebanyak 8.55052 (dalam seminggu), nilai yang diprediksi cenderung lebih tinggi sekitar 8.55 unit dibandingkan dengan rata-rata.
+
+```{r}
+# Visualisasi Model Sebelum Tahun 2022 berdasarkan hari dalam satu minggu
+train_data_sessions %>% 
+  mutate( 
+    wday = wday(Date, label = TRUE) 
+  ) %>% 
+  ggplot(aes(x=Date, y=total_charging_sessions)) + 
+  geom_point(aes(color=wday))  #beda warna disetiap harinya
+```
+#Penjelasan: Hasil grafik menunjukkan bahwa pola tren sesi pengisian terbanyak ada pada hari kerja (monday-friday), namun paling banyak di hari wednesday.Secara umum, jumlah sesi pengisian cenderung meningkat dari waktu ke waktu. Ini menunjukkan peningkatan popularitas kendaraan listrik dan infrastruktur pengisian.
+
+
+## Menyiapkan data test untuk jumlah sesi pengisian
+Untuk melakukan evaluasi dari model yang sudah disiapkan, maka kita bisa menguji model tersebut pada data testing.
+
+```{r}
+# Mengelompokkan dan Menyiapkan data training berdasarkan variabel total_charging_sessions
+date_pd_test_cs <- test_data_sessions %>% 
+  group_by(Date) %>% 
+  summarise(
+    Total_cs = sum(total_charging_sessions)
+  ) #%>%arrange(desc(Total_cs))
+date_pd_test_cs
+```
+
+```{r}
+# Menyiapkan data test
+test_daily_cs <- test_data_sessions %>% 
+  rename(
+    ds = "Date",
+    y = "total_charging_sessions"
+    )
+glimpse(test_daily_cs)
+```
+
+## Model Final
+Model final digunakan untuk memprediksi data testing
+
+```{r}
+# Menyiapkan model final
+model_final_cs <- prophet(changepoint.prior.scale = 0.1, 
+  yearly.seasonality = TRUE, 
+   Holidays = Holiday,
+  changepoint.range = 0.95,
+  trend.prior.scale = 0.05,
+  seasonality.prior.scale = 0.5,
+  holidays.prior.scale = 10,
+  seasonality.mode = "multiplicative"  # Jika data menunjukkan fluktuasi musiman yang lebih besar
+) %>% 
+  add_seasonality(name = "monthly", period = 30.5, fourier.order = 5) %>% 
+  fit.prophet(train_daily_cs) 
+future_final_cs <- make_future_dataframe(model_final_cs, periods = nrow(test_daily_cs) + 1) #create new dataframe for the next period dgn jmlh yng sama dgn data pengujian)
+forecast_final_cs <- predict(model_final_cs, future_final_cs) 
+plot(model_final_cs, forecast_final_cs)
+```
+#Penjelasan: hasil prediksi data testing menurun pada tahun 2022
+
+```{r}
+# Melakukan prediksi dengan data pengujian
+prediction_test_cs <- predict(model_final_cs, test_daily_cs)
+```
+
+```{r}
+# Visualisasi Komponen dari model forecasting
+prophet_plot_components(model_final_cs, prediction_test_cs)
+```
+
+```{r}
+# Hitung MAE
+mae_value_prophet_cs <- mae(test_daily_cs$y, prediction_test_cs$yhat)
+
+# Hitung MSE
+mse_value_prophet_cs <- mse(test_daily_cs$y, prediction_test_cs$yhat)
+
+# Hitung RMSE
+rmse_value_prophet_cs <- rmse(test_daily_cs$y, prediction_test_cs$yhat)
+
+# Hitung MAPE
+mape_value_prophet_cs <- mape(test_daily_cs$y, prediction_test_cs$yhat)
+
+# Tampilkan hasil evaluasi
+cat(paste("MAE: ", mae_value_prophet_cs, "\n"))
+cat(paste("MSE: ", mse_value_prophet_cs, "\n"))
+cat(paste("RMSE: ", rmse_value_prophet_cs, "\n"))
+cat(paste("MAPE: ", mape_value_prophet_cs, "%\n"))
+```
+#Penjelasan: 
+1. MAE: rata-rata selisih antara nilai prediksi dan nilai aktual. Semakin kecil nilai MAE, semakin baik model dalam memprediksi.
+2. MSE: Nilai MSE ini sulit diinterpretasi secara langsung karena satuannya berbeda dengan data asli. Namun, MSE memberikan bobot yang lebih besar pada kesalahan yang besar.
+3. RMSE: RMSE memiliki satuan yang sama dengan data asli, sehingga lebih mudah diinterpretasi. Nilai RMSE ini menunjukkan bahwa rata-rata kesalahan prediksi adalah sekitar 19.35 unit.
+4. MAPE: Nilai  rata-rata kesalahan prediksi dari nilai aktual. Ini adalah nilai yang cukup baik, menunjukkan akurasi yang tinggi.
+Mengambil data Produksi dari hasil prediksi 2011-2022
+
+
+## Prophet Model 2
+
+### Dataset daily_usage_station_set
+
+```{r}
+# membagi data
+# membagi data berdasarkan variabel total_charging_duration
+train_data_index2 <- createDataPartition(daily_usage_station_set$total_charging_duration, p=0.7, list = FALSE)
+train_data_duration <- daily_usage_station_set[train_data_index2,]
+train_data_duration
+test_data_duration <- daily_usage_station_set[-train_data_index2,]
+test_data_duration
+```
+#Penjelasan: Secara efektif membagi dataset menjadi data latih (70) dan data uji (30), dan memastikan bahwa sebagian data disimpan untuk evaluasi model. Pembagian ini penting untuk membangun dan menilai model machine learning.
+```{r}
+dim(train_data_duration)
+dim(test_data_duration)
+```
+
+```{r}
+# Mengelompokkan dan Menyiapkan data training berdasarkan variabel total_charging_duration
+date_train_cd <- train_data_duration %>% 
+  group_by(Date) %>% 
+  summarise(
+    total_charging_duration = sum(total_charging_duration)
+  )
+date_train_cd
+```
+
+
+## Menyiapkan data
+Untuk menggunakan algoritma/model Prophet pertama-tama yang harus dilakukan adalah menyiapkan data frame dengan format: ds untuk menyimpan tanggal, dan y untuk menyimpan dari nilai yang akan prediksi.
+
+```{r}
+# Menyiapkan data
+train_daily_total_duration <- train_data_duration %>% 
+  rename(
+    ds = "Date",
+    y = "total_charging_duration"
+    )
+glimpse(train_daily_total_duration)
+```
+## Menyiapkan data
+Untuk menggunakan algoritma/model Prophet pertama-tama yang harus dilakukan adalah menyiapkan data frame dengan format: ds untuk menyimpan tanggal, dan y untuk menyimpan dari nilai yang akan prediksi.
+
+## Fit Model Data Training
+Melakukan pemodelan data training dengan menggunakan fungsi `fit.prophet()` dimana sebelumnya kita harus menentukan seasonality nya. dalam kasus ini kita mengggunakan `daily.seasonality`
+
+```{r}
+# Membuat model Prophet dengan data training menggunakan parameter daily.seasonality
+model_td <- prophet(
+  daily.seasonality = TRUE,
+  changepoint.prior.scale = 0.1,  # Mengatur perubahan tren yang lebih halus
+  trend.prior.scale = 0.05,       # Mengatur kelicinan tren
+  seasonality.prior.scale = 0.5,  # Memperhatikan musiman dengan lebih ketat
+  changepoint.range = 0.95,       # Mengatur rentang titik perubahan tren
+  holidays.prior.scale = 10,      # Memperbesar pengaruh hari libur
+  seasonality.mode = "multiplicative"  # Menggunakan mode musiman multiplicative untuk data yang menunjukkan fluktuasi yang besar
+) %>% 
+  fit.prophet(train_daily_total_duration)
+```
+#penjelasan: Fungsi ini melatih model Prophet menggunakan data latih yang bernama "train_daily_total_duration". Data ini diasumsikan telah disiapkan dalam format yang sesuai untuk Prophet (misalnya, DataFrame dengan kolom "ds" untuk tanggal dan "y" untuk nilai yang akan diprediksi).Parameter "daily.seasonality = TRUE" memastikan bahwa model akan mencari pola yang berulang setiap hari.Parameter "seasonality_prior_scale" memungkinkan Anda mengontrol seberapa kuat model mempertimbangkan pola musiman.
+
+## Menyiapkan tanggal untuk prediksi
+Periode prediksi adalah 1 tahun kedepan atau 365 hari
+
+```{r}
+# menyiapkan tanggal utk prediksi
+future_td <- make_future_dataframe(model_td, periods = 365, freq = "day")
+glimpse(future_td)
+```
+*** penjelasan
+digunakan untuk mempersiapkan data tanggal yang akan menjadi input untuk model Prophet guna membuat prediksi. Dengan demikian, model akan menghasilkan nilai prediksi untuk setiap tanggal yang ada dalam data frame future_td.Data frame yang berisi satu kolom, yaitu ds yang berisi tanggal-tanggal mulai dari tanggal terakhir dalam data pelatihan hingga 365 hari ke depan.
+
+
+## Visualisasi hasil forecasting untuk perkiraan data 1 tahun kedepan
+
+```{r}
+# visualisasi hasil forecasting
+forecast_td <- predict(model_td, future_td)
+plot(model_td, forecast_td)
+```
+#Penjelasan: Digunakan untuk membandingkan nilai prediksi dengan data historis untuk melihat seberapa baik model dapat menangkap pola dalam data. Hasil prediksi kemudian disi=-mpan dalam sebuah objek baru yang bernama "forecast_td". Objek ini merupakan data frame yang berisi kolom-kolom tambahan seperti "yhat" (nilai prediksi), "yhat_lower" (batas bawah interval kepercayaan), "yhat_upper" (batas atas interval kepercayaan), dan lain-lain, selain kolom "ds" yang berisi tanggal.
+
+
+## Visualisasi komponen model
+Dengan prophet dimungkinkan kita memvisulisasikan berdasarkan trend, weekly, dan yearly.
+Default:
+- daily: sampling hourly, dan frequency 24
+- weekly: sampling daily, dan frequency 7
+- yearly: sampling daily dan frequency 365
+
+```{r}
+#visualiasi komponen model dengan menggunakan parameter daily.seasonality
+prophet_plot_components(model_td, forecast_td)
+```
+
+## forecast berdasarkan seasionality bulan
+
+```{r}
+# forecast berdasarkan seasionality month (bulan)
+model_td_monthly <- prophet(
+  changepoint.prior.scale = 0.1,
+  trend.prior.scale = 0.05,
+  seasonality.prior.scale = 0.5,
+  changepoint.range = 0.95,
+  yearly.seasonality = FALSE,
+  weekly.seasonality = FALSE
+) %>% 
+  add_seasonality(name = "monthly", period = 30.5, fourier.order = 5) %>%
+  fit.prophet(train_daily_total_duration)
+future_td_monthly <- make_future_dataframe(model_td_monthly, periods = 365) 
+forecast_td_monthly <- predict(model_td_monthly, future_td_monthly) 
+prophet_plot_components(model_td_monthly, forecast_td_monthly)
+```
+#Penjelasan: digunakan untuk membuat model peramalan (forecasting) yang fokus pada pola musiman bulanan. Model Prophet dilatih menggunakan data harian, namun dengan sengaja dinonaktifkan komponen musiman tahunannya. Kemudian, model tersebut diberi tahu untuk mencari pola berulang setiap 30.5 hari (sekitar satu bulan) dengan menggunakan fungsi (fourier.order) mengatur kompleksitas data. Setelah dilatih, model digunakan untuk memprediksi data hingga 365 hari ke depan. Terakhir, komponen-komponen utama dari model, seperti tren dan musiman bulanan, divisualisasikan untuk memahami lebih baik bagaimana model bekerja dan apa yang berkontribusi pada hasil prediksi.
+
+## Visualisasi trend permintaan
+
+```{r}
+#visualisasi dari tren awal 2012 dst
+plot(model_td_monthly, forecast_td_monthly)
+```
+#Penjelasan: Visualisasi di atas menunjukkan hasil peramalan permintaan menggunakan model Prophet yang difokuskan pada pola musiman bulanan. Titik-titik hitam mewakili data historis permintaan dari tahun 2012 hingga tahun sebelum dilakukan peramalan. Garis biru tebal merepresentasikan prediksi permintaan untuk tahun-tahun mendatang, sementara area berwarna biru muda menunjukkan interval kepercayaan dari prediksi tersebut. Pola gelombang pada garis biru menunjukkan adanya pola musiman bulanan yang berhasil ditangkap oleh model. Selain itu, garis biru yang secara umum cenderung naik atau turun menunjukkan adanya tren dalam data permintaan. Dengan kata lain, visualisasi ini mengindikasikan bahwa model Prophet mampu menangkap baik pola musiman bulanan maupun tren jangka panjang dalam data permintaan, sehingga dapat digunakan untuk memprediksi permintaan di masa depan dengan tingkat akurasi tertentu.
+
+## forecast berdasarkan seasionality penambahan holiday (hari libur)
+
+```{r}
+# Menetapkan hari libur mulai dari tahun 2011 sampai 2021, misal libur di hari natal 25 desember atau tahun baru setiap tanggal 31 desember
+holiday_td <- 
+  data.frame( 
+    Holiday = "newyeareve", 
+    ds = dmy(c("31-12-2011","31-12-2012","31-12-2013","31-12-2014", "31-12-2015", "31-12-2016", "31-12-2017", "31-12-2018", "31-12-2019", "31-12-2020", "31-12-2021")), 
+    lower_window = -7, 
+    upper_window = +7 
+  ) 
+holiday_td
+
+```
+#penjelasan: Data frame holiday ini akan digunakan sebagai input dalam fungsi "add_country_holidays" atau "add_holidays" pada model Prophet. Dengan menambahkan informasi mengenai hari libur, model Prophet dapat lebih akurat dalam menangkap pola musiman dan tren dalam data, terutama jika terdapat efek signifikan dari hari libur terhadap variabel yang sedang diprediksi.data frame yang berisi informasi mengenai hari libur tahun baru dari tahun 2012 hingga 2022. Data frame ini nantinya akan digunakan dalam model Prophet untuk mengakomodasi pengaruh hari libur terhadap data yang sedang dimodelkan
+
+```{r}
+# visualisasi hasil forecast dengan penambahan efek holiday dalam parameter daily.seasonality
+model_td_holiday <- prophet(
+  changepoint.prior.scale = 0.1,
+  trend.prior.scale = 0.05,
+  seasonality.prior.scale = 0.5,
+  Holidays  = Holiday,
+  changepoint.range = 0.95,
+  seasonality.mode = "multiplicative"  # Menambahkan musiman secara aditif
+) %>% 
+  add_seasonality(name = "monthly", period = 30.5, fourier.order = 5) %>%
+  fit.prophet(train_daily_total_duration)
+future_td_holiday <- make_future_dataframe(model_td_holiday, periods = 365) 
+forecast_td_holiday <- predict(model_td_holiday, future_td_holiday) 
+plot(model_td_holiday, forecast_td_holiday)
+```
+#penjelasan: Visualisasi di atas menunjukkan hasil peramalan permintaan dengan mempertimbangkan efek hari libur. Model Prophet yang digunakan berhasil menangkap pola musiman bulanan, tren jangka panjang, dan pengaruh hari libur terhadap permintaan. Titik-titik hitam mewakili data historis untuk Merepresentasikan data historis permintaan aktual dari periode waktu dari tahun 2012 hingga sebelum periode peramalan.Garis biru tebal adalah peramalan permintaan untuk periode waktu di masa depan. Garis ini mengikuti pola umum dari data historis, tetapi juga memperhitungkan tren dan musim yang diidentifikasi oleh model, dan area berwarna biru muda adalah interval kepercayaan. Penurunan yang signifikan pada saat hari libur besar seperti Tahun Baru dapat terlihat dengan jelas pada grafik, menunjukkan bahwa model telah berhasil mengakomodasi efek hari libur dalam prediksinya. Hal ini mengindikasikan bahwa model ini dapat memberikan prediksi yang lebih akurat dibandingkan dengan model yang tidak memperhitungkan hari libur, terutama untuk periode menjelang dan setelah hari libur.
+
+```{r}
+# melihat trend dan holiday effect dari perkiraan
+prophet_plot_components(model_td_holiday, forecast_td_holiday)
+```
+
+## Melihat hasil perkiraan berdasarkan trend dan seasonality
+
+```{r}
+forecast_td %>%
+  select(ds, trend, weekly, yearly, yhat)
+```
+
+# Model fine Tuning untuk melihat trend liner dari permintaan
+
+Ini digunakan untuk melihat trend perkiraan dengan bentuk lain yaitu dengan menambahkan changepoint
+
+```{r}
+plot(model_td, forecast_td) + 
+  add_changepoints_to_plot(model_td, threshold = 0) 
+```
+#penjelasan: Visualisasi ini menampilkan hasil peramalan permintaan dengan penyesuaian tren (changepoint). Titik-titik hitam mewakili data historis permintaan, garis biru tebal adalah prediksi permintaan, dan area berwarna biru muda menunjukkan interval kepercayaan dari prediksi tersebut. Garis merah menunjukkan titik-titik perubahan tren (changepoint) yang terdeteksi oleh model. Model Prophet yang digunakan telah berhasil mengidentifikasi beberapa perubahan tren yang signifikan dalam data permintaan, yang ditandai dengan perubahan kemiringan garis prediksi. Hal ini mengindikasikan bahwa permintaan tidak selalu mengikuti tren yang konsisten, tetapi mengalami perubahan arah pada beberapa titik waktu tertentu. Dengan demikian, model ini mampu memberikan prediksi yang lebih adaptif terhadap perubahan tren yang terjadi pada data permintaan.
+
+```{r}
+before_2022 <- train_data_duration %>% 
+  mutate( 
+    year = year(Date) 
+  ) %>% 
+  filter(year < 2022) %>% 
+  rename( 
+    ds = "Date", 
+    y = "total_charging_duration" 
+  ) 
+
+after_2022 <- train_data_duration %>% 
+  mutate( 
+    year = year(Date) 
+  ) %>% 
+  filter(year >= 2022) %>% 
+  rename( 
+    ds = "Date", 
+    y = "total_charging_duration" 
+  ) 
+ggplot(before_2022, aes(x=ds, y=y)) + 
+  geom_point() + 
+  theme_minimal()
+```
+
+```{r}
+# Model sebelum 2022 dan visualisasinya
+model_before_2022 <- prophet(yearly.seasonality = TRUE, 
+                             changepoint.prior.scale = 0.1,
+                             trend.prior.scale = 0.05,
+                             seasonality.prior.scale = 0.5,
+                             changepoint.range = 0.95) %>% 
+  fit.prophet(before_2022) 
+future_before_2022 <- make_future_dataframe(model_before_2022, periods = 365) 
+forecaset_before_2022 <- predict(model_before_2022, future_before_2022) 
+plot(model_before_2022, forecaset_before_2022) + 
+  add_changepoints_to_plot(model_before_2022) + 
+  geom_point(data = after_2022, aes(x = as.POSIXct(ds), y=y), color = "tomato3")
+```
+#penjelasan: Secara singkat, visualisasi ini menunjukkan peramalan permintaan sebelum tahun 2022 menggunakan model Prophet. Titik-titik hitam mewakili data historis, garis biru tebal adalah prediksi, dan area berwarna biru muda adalah interval kepercayaan. Garis merah putus-putus menunjukkan titik-titik perubahan tren yang terdeteksi oleh model. Model ini berhasil menangkap pola musiman tahunan dan tren dalam data sebelum tahun 2022. Titik-titik merah yang ditambahkan pada grafik mewakili data aktual setelah tahun 2022, yang dapat dibandingkan dengan prediksi model untuk melihat akurasinya.
+
+```{r}
+# Melihat transaksi paling banyak dalam satu minggu
+forecast_td %>% 
+  mutate( 
+    weekday = wday(ds, label = TRUE), 
+    weekly = round(weekly, 5) 
+  ) %>% 
+  filter(ds <= max(train_data_duration$Date)) %>% 
+  select(weekday, weekly) %>% 
+  distinct() %>% 
+  arrange(-weekly)
+```
+#penjelasan: menunjukkan hari dalam seminggu dan nilai komponen musiman mingguan yang bersesuaian. Hari yang berada di urutan pertama pada tabel tersebut adalah hari dengan transaksi paling banyak dalam seminggu berdasarkan model peramalan yaitu sebanyak 20.47360.
+
+```{r}
+# Visualisasi Model Sebelum Tahun 2022 berdasarkan hari dalam satu minggu
+train_data_duration %>% 
+  mutate( 
+    wday = wday(Date, label = TRUE) 
+  ) %>% 
+  ggplot(aes(x=Date, y=total_charging_duration)) + 
+  geom_point(aes(color=wday)) 
+```
+#penjelasan: Visualisasi ini menunjukkan pola transaksi harian berdasarkan hari dalam seminggu dalam kurun waktu sebelum tahun 2022.Setiap titik mewakili satu hari dan durasi pengisian daya pada hari tersebut.Setiap warna mewakili hari yang berbeda dalam seminggu. Ini membantu kita melihat dengan jelas pola transaksi pada hari-hari tertentu.Jumlah transaksi secara umum cenderung meningkat dari waktu ke waktu.Hari Sabtu dan Minggu cenderung memiliki jumlah transaksi yang lebih tinggi dibandingkan hari kerja.untuk melakukan evaluasi dari model yang sudah disiapkan, maka kita bisa menguji model tersebut pada data testing.
+
+## Menyiapkan data test
+
+```{r}
+# Mengelompokkan dan Menyiapkan data training berdasarkan variabel total_charging_duration
+date_train_duration <- test_data_duration %>% 
+  group_by(Date) %>% 
+  summarise(
+    total_charging_duration = sum(total_charging_duration)
+  )
+date_train_duration
+```
+#penjelasan: Tujuan dari proses ini adalah untuk mendapatkan data yang siap digunakan sebagai input untuk model Prophet. Model Prophet membutuhkan data dalam format yang spesifik, yaitu dengan kolom "ds" untuk tanggal dan kolom "y" untuk nilai yang akan diprediksi.kolom "Date" akan menjadi "ds" dan kolom "total_charging_duration" akan menjadi "y". Hasil perhitungan total durasi pengisian daya untuk setiap hari kemudian disimpan dalam data frame baru yang bernama "date_train_duration". 
+
+```{r}
+# Menyiapkan data
+test_daily_td <- test_data_duration %>% 
+  rename(
+    ds = "Date",
+    y = "total_charging_duration"
+    )
+glimpse(test_daily_td)
+```
+
+## Model Final
+Model final digunakan untuk mempredisi data testing menggunakan parameter yearly.seasonality = TRUE
+
+```{r}
+# Menyiapkan model final
+model_final_duration <- prophet(
+  changepoint.prior.scale = 0.1, 
+  yearly.seasonality = TRUE, 
+  Holidays = Holiday,
+  changepoint.range = 0.95,
+  trend.prior.scale = 0.05,
+  seasonality.prior.scale = 0.5,
+  holidays.prior.scale = 10,
+  seasonality.mode = "multiplicative"  # Jika data menunjukkan fluktuasi musiman yang lebih besar
+) %>% 
+  add_seasonality(name = "monthly", period = 30.5, fourier.order = 5) %>%
+  fit.prophet(test_daily_td)
+future_final_duration <- make_future_dataframe(model_final_duration, periods = nrow(test_daily_td) + 1) 
+forecast_final_duration <- predict(model_final_duration, future_final_duration) 
+plot(model_final_duration, forecast_final_duration)
+```
+#penjelasan: untuk membangun model yang dapat memprediksi durasi pengisian daya kendaraan listrik dengan mempertimbangkan faktor-faktor seperti tren, musiman tahunan, musiman bulanan, dan pengaruh hari libur.Grafik ini menunjukkan bahwa model Prophet berhasil menangkap pola musiman dan tren dalam data durasi pengisian daya. Prediksi mengikuti pola yang serupa dengan data historis, dengan fluktuasi yang sesuai dengan musim atau peristiwa lainnya. Interval kepercayaan menunjukkan bahwa model cukup yakin dengan prediksinya, terutama pada periode di mana terdapat banyak data historis.
+
+```{r}
+# Melakukan prediksi dengan data pengujian
+prediction_test_duration <- predict(model_final_duration, test_daily_td)
+```
+
+```{r}
+# Visualisasi Komponen dari model forecasting
+prophet_plot_components(model_final_duration, prediction_test_duration)
+```
+
+```{r}
+# Evaluasi Model
+library(Metrics)
+# Hitung MAE
+mae_value_prophet_duration <- mae(test_daily_td$y, prediction_test_duration$yhat)
+
+# Hitung MSE
+mse_value_prophet_duration <- mse(test_daily_td$y, prediction_test_duration$yhat)
+
+# Hitung RMSE
+rmse_value_prophet_duration <- rmse(test_daily_td$y, prediction_test_duration$yhat)
+
+# Hitung MAPE
+mape_value_prophet_duration <- mape(test_daily_td$y, prediction_test_duration$yhat)
+
+# Tampilkan hasil evaluasi
+cat(paste("MAE: ", mae_value_prophet_duration, "\n"))
+cat(paste("MSE: ", mse_value_prophet_duration, "\n"))
+cat(paste("RMSE: ", rmse_value_prophet_duration, "\n"))
+cat(paste("MAPE: ", mape_value_prophet_duration, "%\n"))
+```
+#penjelasan: 
+MAE: Nilai ini hasil rata-rata selisih antara prediksi dan nilai aktual adalah sekitar 34.52 unit (satuan durasi pengisian daya).
+MSE:Nilai MSE ini menunjukkan varians dari kesalahan prediksi.
+RMSE: Nilai RMSE ini memberikan gambaran tentang seberapa besar, rata-rata, kesalahan prediksi dalam satuan yang sama dengan variabel target.
+MAPE: rata-rata persentase kesalahan prediksi.
+
+Nilai MAE, MSE, dan RMSE yang dihasilkan oleh model Prophet menunjukkan tingkat kesalahan prediksi yang relatif rendah. Nilai MAPE yang cukup kecil (kurang dari 1%) mengindikasikan bahwa model cukup akurat dalam memprediksi durasi pengisian daya.
+
+**iNterpretasi variabel total_charging_sessions dan total_charging_duration**
+```{r}
+model_performance <- data.frame(
+  No = c(1:2),
+  Model = c("Prophet sessions", "Prophet duration"),
+  MSE = c(mse_value_prophet_cs, mse_value_prophet_duration),
+  RSME = c(rmse_value_prophet_cs, rmse_value_prophet_duration),
+  MAE = c(mae_value_prophet_cs, mae_value_prophet_duration),
+  MAPE = c(mape_value_prophet_cs, mape_value_prophet_duration),
+  stringsAsFactors = FALSE
+  
+)
+model_performance
+```
+#penjelasan:
+
+
+
+```{r}
+# Mengubah kolom "Start_Date" menjadi tipe datetime
+data_selected$Start_Date <- as.POSIXct(data_selected$Start_Date, format="%m/%d/%Y %H:%M")
+data_clean$Start_Date <- data_selected$Start_Date
+glimpse(data_clean)
+```
+
+####- Partisi Dataset
+# Memilih fitur yang relevan untuk model (jika mau menambahkan variasi dari variable datetime
+```{r}
+df <- data_clean %>%
+  mutate(
+    Hour = hour(Start_Date),               # Jam dari waktu mulai
+    DayOfWeek = wday(Start_Date, label = TRUE), # Hari dalam minggu
+    Month = month(Start_Date),             # Bulan
+    Year = year(Start_Date)                # Tahun (opsional untuk analisis jangka panjang)
+  )
+```
+
+
+```{r}
+# Membagi data menjadi training dan testing
+library(rsample)
+set.seed(123)  # Untuk reproducibility
+data_split_rf_1 <- initial_split(df, prop = 0.7)
+data_train_rf_1 <- training(data_split_rf_1)
+data_test_rf_1 <- testing(data_split_rf_1)
+```
+
+####- Model RF 
+```{r}
+# Membuat model RF
+rf_model_1 <- randomForest(Total_Duration ~ Charging_Time + Energy + GHG_Savings + Gasoline_Savings + Port_Number + Postal_Code + Longitude + Latitude + Fee + Plug_In_Event_Id + Station_Name + Start_Date + Hour + DayOfWeek + Month + Year, data = data_train_rf_1, ntree = 50)
+rf_model_1
+```
+
+```{r}
+# Melakukan Prediksi terhadap Data Pengujian
+predictions_rf_1 <- predict(rf_model_1, data_test_rf_1)
+```
+
+```{r}
+# Visualisasi Hasil Prediksi dengan Line Plot
+result_data_rf_1 <- data.frame(
+  Index = 1:nrow(data_test_rf_1),
+  Total_Duration = data_test_rf_1$Total_Duration,
+  Predictions = predictions_rf_1
+)
+
+data_subset_1 <- result_data_rf_1[1:200, ]
+
+ggplot(data_subset_1, aes(x = Index)) +
+  geom_line(aes(y = Total_Duration, color = "Actual"), size = 1) +
+  geom_line(aes(y = Predictions, color = "Predicted"), size = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Actual" = "blue", "Predicted" = "red")) +
+  labs(
+    title = "Perbandingan Total Charging Duration Aktual dan Prediksi",
+    x = "Index",
+    y = "Total Charging Duration",
+    color = "Legend"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+ggplot(data = data_subset_1, aes(x = Total_Duration, y = Predictions)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  scale_x_continuous(labels = scales::comma) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    x = "Total Charging Duration",
+    y = "Prediksi Charging Duration",
+    title = "Perbandingan Charging Duration Aktual dan Prediksi Model RF"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Evaluasi RF Model
+
+# Hitung MAE
+mae_value_rf <- mae(data_test_rf_1$Total_Duration, predictions_rf_1)
+
+# Hitung MSE
+mse_value_rf <- mse(data_test_rf_1$Total_Duration, predictions_rf_1)
+
+# Hitung RMSE
+rmse_value_rf <- rmse(data_test_rf_1$Total_Duration, predictions_rf_1)
+
+# Hitung MAPE
+mape_value_rf <- mape(data_test_rf_1$Total_Duration, predictions_rf_1)
+
+# Tampilkan hasil evaluasi
+cat(paste("MAE: ", mae_value_rf, "\n"))
+cat(paste("MSE: ", mse_value_rf, "\n"))
+cat(paste("RMSE: ", rmse_value_rf, "\n"))
+cat(paste("MAPE: ", mape_value_rf, "%\n"))
+```
+
+
+#Penambahan 2 Prediktor
+```{r}
+df <- df[1:length(prediction_test_cs$yhat),]
+df$PredictionResult1 <- prediction_test_cs$yhat
+df$PredictionResult2 <- prediction_test_duration$yhat
+df
+```
+
+
+```{r}
+# Membagi data menjadi training dan testing
+library(rsample)
+set.seed(123)  # Untuk reproducibility
+data_split_rf_2 <- initial_split(df, prop = 0.7)
+data_train_rf_2 <- training(data_split_rf_2)
+data_test_rf_2 <- testing(data_split_rf_2)
+```
+
+####- Model RF 
+```{r}
+# Membuat model RF
+rf_model_2 <- randomForest(Total_Duration ~ Charging_Time + Energy + GHG_Savings + Gasoline_Savings + Port_Number + Postal_Code + Longitude + Latitude + Fee + Plug_In_Event_Id + Station_Name + Start_Date + Hour + DayOfWeek + Month + Year + PredictionResult1 + PredictionResult2, data = data_train_rf_2, ntree = 50)
+rf_model_2
+```
+
+```{r}
+# Melakukan Prediksi terhadap Data Pengujian
+predictions_rf_2 <- predict(rf_model_2, data_test_rf_2)
+```
+
+```{r}
+# Visualisasi Hasil Prediksi dengan Line Plot
+result_data_rf_2 <- data.frame(
+  Index = 1:nrow(data_test_rf_2),
+  Total_Duration = data_test_rf_2$Total_Duration,
+  Predictions = predictions_rf_2
+)
+
+data_subset_2 <- result_data_rf_2[1:200, ]
+
+ggplot(data_subset_2, aes(x = Index)) +
+  geom_line(aes(y = Total_Duration, color = "Actual"), size = 1) +
+  geom_line(aes(y = Predictions, color = "Predicted"), size = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Actual" = "blue", "Predicted" = "red")) +
+  labs(
+    title = "Perbandingan Total Charging Duration Aktual dan Prediksi",
+    x = "Index",
+    y = "Total Charging Duration",
+    color = "Legend"
+  ) +
+  theme_minimal()
+```
+```{r}
+# Visualisasi Hasil scatter plot
+result_plot_rf_2 <- data.frame(Total_Duration = data_test_rf_2$Total_Duration, Predictions = predictions_rf_2)
+
+# Visualisasi Perbandingan Produksi Aktual dengan Hasil Prediksi
+scatterplot_2 <- ggplot(data = result_plot_rf_2, aes(x = Total_Duration, y = Predictions)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  scale_x_continuous(labels = scales::comma) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Total Charging duration", y = "Prediksi Charging duration") +
+  ggtitle("Perbandingan Charging duration Aktual dan Prediksi Model RF")  +
+  theme_minimal()
+scatterplot_2
+
+```
+
+
+```{r}
+# Evaluasi RF Model
+
+# Hitung MAE
+mae_value_rf_2 <- mae(data_test_rf_2$Total_Duration, predictions_rf_2)
+
+# Hitung MSE
+mse_value_rf_2 <- mse(data_test_rf_2$Total_Duration, predictions_rf_2)
+
+# Hitung RMSE
+rmse_value_rf_2 <- rmse(data_test_rf_2$Total_Duration, predictions_rf_2)
+
+# Hitung MAPE
+mape_value_rf_2 <- mape(data_test_rf_2$Total_Duration, predictions_rf_2)
+
+# Tampilkan hasil evaluasi
+cat(paste("MAE: ", mae_value_rf_2, "\n"))
+cat(paste("MSE: ", mse_value_rf_2, "\n"))
+cat(paste("RMSE: ", rmse_value_rf_2, "\n"))
+cat(paste("MAPE: ", mape_value_rf_2, "%\n"))
+```
+```{r}
+glimpse(df)
+```
+
+# Untuk menjawab rumusan masalah kedua Menghitung rata-rata prediksi permintaan berdasarkan lokasi stasiun 
+```{r}
+#Menghitung rata-rata prediksi permintaan berdasarkan lokasi stasiun
+demand_by_station <- df %>%
+  group_by(
+    Station_Name, Total_Duration, Charging_Time, Energy, GHG_Savings, Gasoline_Savings,
+    Port_Number, Postal_Code, Longitude, Latitude, Fee,
+    Plug_In_Event_Id, Start_Date, Hour, DayOfWeek, Month, Year
+  ) %>%
+  summarise(
+    AverageDemand = mean(as.numeric(predictions_rf_1), na.rm = TRUE),
+    TotalDemand = sum(as.numeric(predictions_rf_1), na.rm = TRUE) # Memastikan hanya kolom numerik yang dihitung untuk TotalDemand dan AverageDemand
+  )
+demand_by_station
+
+
+```
+```{r}
+# Menampilkan stasiun dengan permintaan tertinggi 
+top_stations <- demand_by_station %>% 
+  arrange(desc(AverageDemand)) %>% 
+  head(10)
+# Menampilkan hasilnya
+top_stations
+```
+
+```{r}
+
+# Visualisasi 10 stasiun dengan permintaan tertinggi
+ggplot(demand_by_station, aes(x = reorder(Station_Name, -AverageDemand), y = AverageDemand, fill = Station_Name)) +
+  geom_bar(stat = "identity") +
+  coord_flip() + # Membuat grafik horizontal agar lebih mudah dibaca
+  labs(
+    title = "10 Stasiun dengan Permintaan Tertinggi",
+    x = "Nama Stasiun",
+    y = "Permintaan Rata-rata",
+    fill = "Nama Stasiun"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") # Menghilangkan legenda karena sudah ditampilkan di sumbu x
+
+```
+```{r}
+glimpse(demand_by_station)
+```
+```{r}
+
+# Filter data hanya untuk dua stasiun teratas
+top_stations <- demand_by_station %>%
+  filter(Station_Name %in% c("PALO ALTO CA / BRYANT #1", "PALO ALTO CA / BRYANT #2"))
+
+# Perhitungan jumlah permintaan per hari
+daily_demand <- top_stations %>%
+  group_by(Station_Name, Date = as.Date(Start_Date)) %>%
+  summarise(TotalDemand = sum(TotalDemand, na.rm = TRUE), .groups = "drop")
+
+# Perhitungan jumlah permintaan per minggu
+weekly_demand <- top_stations %>%
+  group_by(Station_Name, Week = floor_date(as.Date(Start_Date), "week")) %>%
+  summarise(TotalDemand = sum(TotalDemand, na.rm = TRUE), .groups = "drop")
+
+# Perhitungan jumlah permintaan per bulan
+monthly_demand <- top_stations %>%
+  group_by(Station_Name, Month = floor_date(as.Date(Start_Date), "month")) %>%
+  summarise(TotalDemand = sum(TotalDemand, na.rm = TRUE), .groups = "drop")
+
+# Visualisasi jumlah permintaan per hari
+ggplot(daily_demand, aes(x = Date, y = TotalDemand, color = Station_Name)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Jumlah Permintaan Harian pada Dua Stasiun Teratas",
+    x = "Tanggal",
+    y = "Total Permintaan",
+    color = "Nama Stasiun"
+  ) +
+  theme_minimal()
+
+# Visualisasi jumlah permintaan per minggu
+ggplot(weekly_demand, aes(x = Week, y = TotalDemand, color = Station_Name)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Jumlah Permintaan Mingguan pada Dua Stasiun Teratas",
+    x = "Minggu",
+    y = "Total Permintaan",
+    color = "Nama Stasiun"
+  ) +
+  theme_minimal()
+
+# Visualisasi jumlah permintaan per bulan
+ggplot(monthly_demand, aes(x = Month, y = TotalDemand, fill = Station_Name)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Jumlah Permintaan Bulanan pada Dua Stasiun Teratas",
+    x = "Bulan",
+    y = "Total Permintaan",
+    fill = "Nama Stasiun"
+  ) +
+  theme_minimal()
+
+```
